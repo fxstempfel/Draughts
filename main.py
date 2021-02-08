@@ -1,4 +1,7 @@
-from typing import List, Optional, Set
+from __future__ import annotations
+
+from collections import deque
+from typing import List, Optional
 
 
 class Color:
@@ -70,16 +73,40 @@ class Take(Move):
     def __repr__(self):
         return f"Take({self.moved_to} by {self.taken})"
 
+    def __eq__(self, other):
+        if not isinstance(other, Take):
+            return False
+        return self.moved_to == other.moved_to and self.taken == other.taken
+
+    def __hash__(self):
+        return hash((str(self.moved_to), str(self.taken)))
+
 
 class PossibleTakes:
-    def __init__(self, takes: List[Take]):
-        self.list_of_takes_series = [takes]
+    def __init__(self, takes: deque[Take] = None):
+        if takes is None:
+            self.list_of_takes_series = []
+        else:
+            self.list_of_takes_series = [takes]
 
     def __len__(self):
         return len(self.list_of_takes_series)
 
     def __repr__(self):
         return f"PossibleTakes({self.list_of_takes_series})"
+
+    @staticmethod
+    def from_all(*args) -> PossibleTakes:
+        res = PossibleTakes()
+        for other in args:
+            if other is None:
+                continue
+            res.merge(other)
+        return res
+
+    def prepend(self, take: Take):
+        for x in self.list_of_takes_series:
+            x.insert(0, take)
 
     def longest_size(self):
         try:
@@ -109,13 +136,21 @@ class Positions:
     def all(self):
         return self.blacks + self.whites
 
-    def get_color(self, color):
+    def get(self, color):
         if color == Color.BLACK:
             return self.blacks
         elif color == Color.WHITE:
             return self.whites
         else:
             raise ValueError(f"Unsupported color: {color}")
+
+    def color_of(self, cell: Cell) -> Optional[Color]:
+        if cell in self.blacks:
+            return BLACK
+        elif cell in self.whites:
+            return WHITE
+        else:
+            return None
 
 
 def _take(start_cell, target_cell, positions):
@@ -126,66 +161,63 @@ def _take(start_cell, target_cell, positions):
         return Take(next_, target_cell)
 
 
-def _rec_take(start_cell, target_cell, color, positions, history=None, i=0) -> Optional[PossibleTakes]:
-    """This finds the longest possible takes"""
-    # todo there's no need of having history? returning the list of taken in reverse order is enough. BUT!! need to keep track of taken pieces
-    #  so: 2 args: taken_pieces: only taken cells in prior steps
-    #              takes_series: series of Takes in reverse order, when nothing to take just return none, otherwise rec call + append current take to longest results
+def _rec_take(start_cell, target_cell, color, positions, takes_series=None, i=0) -> Optional[PossibleTakes]:
+    """This finds the longest possible takes, returned IN REVERSE ORDER"""
     tabs = '\t' * i
     header = f"{tabs}#{i} - {start_cell} / {target_cell} || "
-    print(f"{header}history {history}")
+    print(f"{header}takes series {takes_series}")
 
-    if target_cell in positions.get_color(color.opponent()):
+    if target_cell in positions.get(color.opponent()):
         take = _take(start_cell, target_cell, positions)
         if take is None:
             print(f"{header}TAKE NONE")
-            return PossibleTakes(history)
+            return None
         else:
-            if history is None:
-                print(f"{header}ONGOING EMPTY")
-                history = [take]
+            if takes_series is None:
+                print(f"{header}TAKES SERIES EMPTY")
+                takes_series = [target_cell]
             else:
-                history.append(take)
+                takes_series.append(target_cell)
 
             # find neighbors of the cell we just moved to
             neighbors_next = take.moved_to.neighbors()
 
             # remove neighbors that have already been taken in the history
-            for c in map(lambda x: x.taken, history):
+            for c in takes_series:
                 try:
                     neighbors_next.remove(c)
                 except ValueError:
                     pass
 
-            print(f"{header}Will start {len(neighbors_next)}")
+            print(f"{header}Will explore {len(neighbors_next)} neighbors")
             # explore neighbors
-            takes_by_neighbor = [_rec_take(take.moved_to, n_, color, positions, history, i + 1) for n_ in neighbors_next]
+            takes_by_neighbor = [_rec_take(take.moved_to, n_, color, positions, takes_series, i + 1) for n_ in neighbors_next]
             print(f"{header}Back with {takes_by_neighbor}")
 
-            takes_by_neighbor = [x for x in takes_by_neighbor if x is not None]
-            print(f"{header}Cleaned {takes_by_neighbor}")
             # merge the results
-            merged_takes = takes_by_neighbor[0]
-            for t in takes_by_neighbor[1:]:
-                merged_takes.merge(t)
+            merged_takes = PossibleTakes.from_all(*takes_by_neighbor)
             print(f"{header}Merged {merged_takes}")
             print(f"{header}Longest {merged_takes.longest_size()}")
+            print(f"{header}Will add {take}")
+            if merged_takes.longest_size() == 0:
+                merged_takes = PossibleTakes(deque([take]))
+            else:
+                merged_takes.prepend(take)
+            print(f"{header}Added {merged_takes}")
             return merged_takes
     else:
-        print(f"{header}Nothing to take")
-        if history is None:
-            return None
-        else:
-            return PossibleTakes(history)
+        print(f"{header}NOT OPPONENT")
+        return None
 
 
-def possible_moves(current_position, color, positions):
+def possible_moves(current_position, positions):
+    color = positions.color_of(current_position)
     moves = []
     has_taken = False
     neighbors = current_position.neighbors()
     for n in neighbors:
         # check if there's a piece on the neighbor
-        if n in positions.get_color(color.color):
+        if n in positions.get(color.color):
             continue
 
         if not has_taken and color.move_is_forward(current_position, n):
@@ -203,6 +235,10 @@ def possible_moves(current_position, color, positions):
     return [m for m in moves if len(m) == max_size]
 
 
+BLACK = Color(Color.BLACK)
+WHITE = Color(Color.WHITE)
+
+
 if __name__ == '__main__':
     cells = [Cell(x, y) for x in range(10) for y in range(10) if (x + y) % 2 == 0]
     #black_cells = [c for c in cells if c.y >= 6]
@@ -210,11 +246,9 @@ if __name__ == '__main__':
     black_cells = [Cell(9, 3)]
     white_cells = [Cell(8, 4), Cell(6, 4), Cell(5, 5), Cell(6, 2), Cell(4, 2)]
 
-    BLACK = Color(Color.BLACK)
-    WHITE = Color(Color.WHITE)
     positions = Positions(black_cells, white_cells)
 
-    res = possible_moves(Cell(9, 3), BLACK, positions)
+    res = possible_moves(Cell(9, 3), positions)
     print(f"FINAL: {len(res)}")
     print(f"FINAL: {max(len(x) for x in res)}")
     print(f"FINAL: {res}")
