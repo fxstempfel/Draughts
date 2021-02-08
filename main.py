@@ -63,6 +63,14 @@ class Move:
     def __init__(self, moved_to: Cell):
         self.moved_to = moved_to
 
+    def __repr__(self):
+        return f"Move({self.moved_to})"
+
+    def __eq__(self, other):
+        if isinstance(other, Move):
+            return False
+        return self.moved_to == other.moved_to
+
 
 class Take(Move):
     def __init__(self, moved_to: Cell, taken: Cell):
@@ -128,7 +136,15 @@ class PossibleTakes:
 
 
 class Positions:
-    def __init__(self, blacks, whites):
+    def __init__(self, blacks=None, whites=None):
+        if blacks is None and whites is None:
+            cells = [Cell(x, y) for x in range(10) for y in range(10) if (x + y) % 2 == 0]
+            blacks = [c for c in cells if c.y >= 6]
+            whites = [c for c in cells if c.y <= 3]
+        elif blacks is None:
+            blacks = []
+        elif whites is None:
+            whites = []
         self.blacks = blacks
         self.whites = whites
 
@@ -222,6 +238,9 @@ def possible_moves(current_position, positions):
 
         if not has_taken and color.move_is_forward(current_position, n):
             # if the move is forward, we can go there
+            # todo do not encapsulate Move in a list; but then what to do if there are takes?
+            #   moves could be a list of Move's and list of Take's but not optimal => custom type for list of Take's?
+            #                                                                       > reuse of PossibleTakes?
             moves.append([Move(n)])
             continue
 
@@ -240,9 +259,6 @@ WHITE = Color(Color.WHITE)
 
 
 if __name__ == '__main__':
-    cells = [Cell(x, y) for x in range(10) for y in range(10) if (x + y) % 2 == 0]
-    #black_cells = [c for c in cells if c.y >= 6]
-    #white_cells = [c for c in cells if c.y <= 3]
     black_cells = [Cell(9, 3)]
     white_cells = [Cell(8, 4), Cell(6, 4), Cell(5, 5), Cell(6, 2), Cell(4, 2)]
 
