@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from collections import deque
-from typing import List, Optional
+from typing import List, Optional, Set, Tuple, Union
 
 
 class Color:
@@ -38,7 +38,10 @@ class Cell:
         return f"Cell({self.x}, {self.y})"
 
     def __eq__(self, other):
-        return self.x == other.x and self.y == other.y
+        return self.position == other.position
+
+    def __hash__(self):
+        return hash(self.position)
 
     def neighbors(self):
         terms_i = 1, -1, 1, -1
@@ -67,9 +70,12 @@ class Move:
         return f"Move({self.moved_to})"
 
     def __eq__(self, other):
-        if isinstance(other, Move):
+        if not isinstance(other, Move):
             return False
         return self.moved_to == other.moved_to
+
+    def __hash__(self):
+        return hash(self.moved_to)
 
 
 class Take(Move):
@@ -92,10 +98,9 @@ class Take(Move):
 
 class PossibleTakes:
     def __init__(self, takes: deque[Take] = None):
-        if takes is None:
-            self.list_of_takes_series = []
-        else:
-            self.list_of_takes_series = [takes]
+        self.list_of_takes_series: List[deque[Take]] = []
+        if takes is not None:
+            self.list_of_takes_series.append(takes)
 
     def __len__(self):
         return len(self.list_of_takes_series)
@@ -130,9 +135,12 @@ class PossibleTakes:
         self._unify()
         self.remove_not_longest()
 
+    def settify(self):
+        return set(tuple(l) for l in self.list_of_takes_series)
+
     def _unify(self):
         tup = (tuple(l) for l in self.list_of_takes_series)
-        self.list_of_takes_series = list(list(x) for x in set(tup))
+        self.list_of_takes_series = [deque(x) for x in set(tup)]
 
 
 class Positions:
@@ -226,32 +234,39 @@ def _rec_take(start_cell, target_cell, color, positions, takes_series=None, i=0)
         return None
 
 
-def possible_moves(current_position, positions):
+def legal_moves(current_position: Cell, positions: Positions) -> Union[Set[Move], Set[Tuple[Take]]]:
+    """
+    Find every legal moves, starting from this current position and given these positions
+
+    :param current_position:
+    :param positions:
+    :return: a set of Moves if no takes are possible or a set of tuples of Takes if takes are possible
+    """
     color = positions.color_of(current_position)
-    moves = []
+    moves = set()
     has_taken = False
     neighbors = current_position.neighbors()
     for n in neighbors:
-        # check if there's a piece on the neighbor
+        # check if there's a piece of the current color on the neighbor
         if n in positions.get(color.color):
             continue
 
+        # if the cell is forward and moves contains no Takes yet
         if not has_taken and color.move_is_forward(current_position, n):
             # if the move is forward, we can go there
-            # todo do not encapsulate Move in a list; but then what to do if there are takes?
-            #   moves could be a list of Move's and list of Take's but not optimal => custom type for list of Take's?
-            #                                                                       > reuse of PossibleTakes?
-            moves.append([Move(n)])
+            moves.add(Move(n))
             continue
 
+        # otherwise try to take the piece
         these_moves = _rec_take(current_position, n, color, positions)
         if these_moves is not None:
-            has_taken = True
-            moves += these_moves.list_of_takes_series
+            if not has_taken:
+                has_taken = True
+                # reinitialize moves
+                moves = set()
+            moves.update(these_moves.settify())
 
-    # only keep the the longest moves
-    max_size = max(len(x) for x in moves)
-    return [m for m in moves if len(m) == max_size]
+    return moves
 
 
 BLACK = Color(Color.BLACK)
@@ -264,7 +279,6 @@ if __name__ == '__main__':
 
     positions = Positions(black_cells, white_cells)
 
-    res = possible_moves(Cell(9, 3), positions)
+    res = legal_moves(Cell(9, 3), positions)
     print(f"FINAL: {len(res)}")
-    print(f"FINAL: {max(len(x) for x in res)}")
     print(f"FINAL: {res}")
